@@ -122,7 +122,7 @@ def main():
         elif "df" in st.session_state and st.session_state["df"].empty:
             st.warning("Brak danych dla wybranych filtrów.")
 
-    elif page == "Wykresy":
+    elif page == "Wykresy gen":
         st.subheader("📈 Wykresy (do zaimplementowania)")
         st.info("Tutaj pojawią się wykresy po implementacji.")
 
