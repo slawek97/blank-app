@@ -55,7 +55,7 @@ def main():
     st.title("⚡ PSE generacja jednostek konwencjonalnych")
 
     # Sidebar - menu wyboru widoku
-    page = st.sidebar.radio("Wybierz widok", ["Widok tabeli", "Wykresy"])
+    page = st.sidebar.radio("Wybierz widok", ["Widok tabeli", "Wykresy gen"])
 
     # Tylko w trybie tabeli
     if page == "Widok tabeli":
