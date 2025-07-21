@@ -8,7 +8,7 @@ from datetime import datetime
 import plotly.graph_objs as go
 
 # --- Stałe
-FILE_ID = "1fGIqDloAMGWQjfSGVwqJX3nRLq3UUHAt"
+FILE_ID = "1S0LuZ0KO_hZLF1W8X814QPdfBnp9gwPq"
 DOWNLOAD_URL = f"https://drive.google.com/uc?id={FILE_ID}"
 LOCAL_DB_PATH = "/tmp/baza.sqlite"
 TABLE_NAME = "gen_jw_data"
