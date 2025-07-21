@@ -59,7 +59,7 @@ def main():
     st.title("⚡ PSE generacja jednostek konwencjonalnych")
 
     # Sidebar - menu wyboru widoku
-    page = st.sidebar.radio("Wybierz widok", ["Widok tabeli", "Wykresy gen"])
+    page = st.sidebar.radio("Wybierz widok", ["Widok tabeli", "Wykresy"])
 
     if page == "Widok tabeli":
         download_db()
@@ -120,7 +120,7 @@ def main():
             st.warning("Brak danych dla wybranych filtrów.")
 
     # --- Wykresy
-    elif page == "Wykresy gen":
+    elif page == "Wykresy":
         st.subheader("📈 Wykresy generacji bloków w jednostkach")
 
         download_db()
