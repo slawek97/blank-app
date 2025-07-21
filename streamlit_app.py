@@ -5,6 +5,7 @@ import sqlite3
 import requests
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 from datetime import datetime
+import plotly.graph_objs as go
 
 # --- Stałe
 FILE_ID = "1fGIqDloAMGWQjfSGVwqJX3nRLq3UUHAt"
@@ -31,21 +32,24 @@ def get_power_plants():
     con.close()
     return df["power_plant"].dropna().tolist()
 
-# --- Pobierz dane z bazy
-def fetch_data(start_date, end_date, plant_name):
-    con = sqlite3.connect(LOCAL_DB_PATH)
+# --- Pobierz dane z bazy (dla wielu jednostek)
+def fetch_data_multi(start_date, end_date, plant_names):
+    if not plant_names:
+        return pd.DataFrame()
+
+    placeholders = ",".join("?" for _ in plant_names)
     query = f"""
     SELECT *
     FROM {TABLE_NAME}
     WHERE business_date BETWEEN ? AND ?
-    AND power_plant LIKE ?
+    AND power_plant IN ({placeholders})
     ORDER BY dtime_utc
     LIMIT 100000
     """
-    start_str = start_date.strftime("%Y-%m-%d") if isinstance(start_date, datetime) else str(start_date)
-    end_str = end_date.strftime("%Y-%m-%d") if isinstance(end_date, datetime) else str(end_date)
-    param = f"%{plant_name}%" if plant_name else "%"
-    df = pd.read_sql_query(query, con, params=(start_str, end_str, param))
+    params = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")] + plant_names
+
+    con = sqlite3.connect(LOCAL_DB_PATH)
+    df = pd.read_sql_query(query, con, params=params)
     con.close()
     return df
 
@@ -57,12 +61,10 @@ def main():
     # Sidebar - menu wyboru widoku
     page = st.sidebar.radio("Wybierz widok", ["Widok tabeli", "Wykresy gen"])
 
-    # Tylko w trybie tabeli
     if page == "Widok tabeli":
         download_db()
         plant_options = ["(Wszystkie)"] + get_power_plants()
 
-        # Filtry
         col1, col2, col3 = st.columns(3)
         with col1:
             start_date = st.date_input("Data początkowa", datetime(2025, 1, 1))
@@ -71,22 +73,18 @@ def main():
         with col3:
             selected_plant = st.selectbox("Jednostka (power_plant)", plant_options)
 
-        # Pobierz dane przy kliknięciu
         if st.button("🔄 Pobierz dane"):
             plant_filter = "" if selected_plant == "(Wszystkie)" else selected_plant
-
             with st.spinner("Ładowanie danych z bazy..."):
-                df = fetch_data(start_date, end_date, plant_filter)
+                df = fetch_data_multi(start_date, end_date, [plant_filter] if plant_filter else get_power_plants())
                 st.session_state["df"] = df
         else:
             if "df" not in st.session_state:
                 st.info("Ustaw filtry i kliknij **Pobierz dane**, aby rozpocząć.")
 
-        # Tabela i eksport (jeśli są dane)
         if "df" in st.session_state and not st.session_state["df"].empty:
             df = st.session_state["df"]
 
-            # Eksport CSV nad tabelą (poszerzony przycisk po prawej)
             col_space, col_dl = st.columns([7, 1])
             with col_dl:
                 st.download_button(
@@ -98,7 +96,6 @@ def main():
                     use_container_width=True
                 )
 
-            # Konfiguracja tabeli
             gb = GridOptionsBuilder.from_dataframe(df)
             gb.configure_pagination(enabled=True)
             gb.configure_default_column(
@@ -122,14 +119,70 @@ def main():
         elif "df" in st.session_state and st.session_state["df"].empty:
             st.warning("Brak danych dla wybranych filtrów.")
 
+    # --- Wykresy
     elif page == "Wykresy gen":
-        st.subheader("📈 Wykresy (do zaimplementowania)")
-        st.info("Tutaj pojawią się wykresy po implementacji.")
+        st.subheader("📈 Wykresy generacji bloków w jednostkach")
 
-    # Stopka wyrównana do prawej
+        download_db()
+        plant_options = get_power_plants()
+
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_plants = st.multiselect("Wybierz jednostki (power_plant)", plant_options)
+        with col2:
+            date_range = st.date_input("Zakres dat", [datetime(2025, 1, 1), datetime(2025, 1, 7)])
+
+        if len(date_range) != 2:
+            st.warning("Wybierz poprawny zakres dat.")
+            return
+
+        start_date, end_date = date_range
+
+        if st.button("Generuj wykres"):
+            if not selected_plants:
+                st.warning("Wybierz przynajmniej jedną jednostkę.")
+                return
+
+            with st.spinner("Ładowanie danych..."):
+                df = fetch_data_multi(start_date, end_date, selected_plants)
+
+            if df.empty:
+                st.warning("Brak danych dla wybranych filtrów.")
+            else:
+                df["dtime_utc"] = pd.to_datetime(df["dtime_utc"])
+                df["blok"] = df["power_plant"] + " / " + df["resource_code"]
+
+                fig = go.Figure()
+
+                for (plant, resource), group in df.groupby(["power_plant", "resource_code"]):
+                    group = group.sort_values("dtime_utc")
+                    fig.add_trace(go.Scatter(
+                        x=group["dtime_utc"],
+                        y=group["wartosc"],
+                        mode="lines+markers",
+                        name=f"{plant} / {resource}",
+                        hovertemplate=f"{plant} / {resource}<br>%{{x}}<br>%{{y:.2f}} MW<extra></extra>"
+                    ))
+
+                fig.update_layout(
+                    title="Generacja bloków (MW)",
+                    xaxis_title="Czas",
+                    yaxis_title="Moc [MW]",
+                    hovermode="x unified",
+                    template="plotly_white",
+                    legend_title="Bloki"
+                )
+
+                fig.update_xaxes(rangeslider_visible=True)
+                fig.update_layout(dragmode="zoom")
+
+                st.plotly_chart(fig, use_container_width=True)
+
+
+    # --- Stopka
     st.markdown("---")
     st.markdown(
-        '<div style="text-align:right; font-size:12px; color:gray;">v.1.1 &nbsp;&nbsp;|&nbsp;&nbsp; SB &nbsp;&nbsp;|&nbsp;&nbsp; bekasiewiczslawomir@gmail.com</div>',
+        '<div style="text-align:right; font-size:12px; color:gray;">v.1.2 &nbsp;&nbsp;|&nbsp;&nbsp; SB &nbsp;&nbsp;|&nbsp;&nbsp; bekasiewiczslawomir@gmail.com</div>',
         unsafe_allow_html=True
     )
 
