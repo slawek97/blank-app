@@ -1,6 +1,8 @@
 streamlit
 pandas
 requests
-streamlit-aggrid
+openpyxl
+folium
+streamlit-folium
 plotly
-kaleido
+st-aggrid
