@@ -104,7 +104,7 @@ def add_legend_to_map(m):
     legend_html = """
      <div style="
          position: fixed;
-         bottom: 30px;
+         top: 300px;
          left: 30px;
          width: 200px;
          background-color: white;
