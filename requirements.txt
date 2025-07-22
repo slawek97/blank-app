@@ -5,4 +5,3 @@ openpyxl
 folium
 streamlit-folium
 plotly
-st-aggrid
