@@ -244,7 +244,7 @@ def mapa_view():
         result = st_folium(m, width=900, height=600)
 
         # Przyciski eksportu w jednej linii
-        col1, col2, col3,col4,col5 = st.columns(5)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
             csv_map = df_map.to_csv(index=False).encode("utf-8")
