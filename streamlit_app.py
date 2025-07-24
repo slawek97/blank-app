@@ -100,6 +100,37 @@ def load_power_plant_locations_pl():
 
     return agg_df[["plant_name", "fuel_type", "capacity_mw", "lat", "lon"]]
 
+@st.cache_data
+def load_power_plant_data():
+    dropbox_url_p = "https://www.dropbox.com/scl/fi/n67poigdaxa1bvd7qga8l/power_plants_info.xlsx?rlkey=51c64jfi10fjuz31vz3dtwdu8&st=9im89fa3&dl=1"
+    try:
+        response = requests.get(dropbox_url_p)
+        response.raise_for_status()
+    except Exception as e:
+        st.error(f"❌ Nie udało się pobrać danych lokalizacyjnych z Dropboxa: {e}")
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_excel(BytesIO(response.content), engine='openpyxl')
+    except Exception as e:
+        st.error(f"❌ Błąd podczas odczytu pliku Excel: {e}")
+        return pd.DataFrame()
+
+    # Konwersje nazw kolumn na łatwiejsze
+    df = df.rename(columns={
+        "Nazwa obiektu []": "plant_name",
+        "Paliwo 1 PL []": "fuel_type",
+        "Moc zainstalowana elektryczna brutto [MW_e]": "capacity_mw",
+        "Szerokość geograficzna []": "lat",
+        "Długość geograficzna []": "lon"
+    })
+
+    df["capacity_mw"] = pd.to_numeric(df["capacity_mw"], errors="coerce")
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
+
+    return df.dropna(subset=["lat", "lon", "plant_name"])
+
 def add_legend_to_map(m):
     legend_html = """
      <div style="
@@ -162,33 +193,101 @@ def get_marker_radius(capacity):
 def mapa_view():
     st.title("Mapa jednostek wytwórczych")
 
-    df = load_power_plant_locations_pl()
-    if df.empty:
+    df_blocks = load_power_plant_data()  # pełne dane jednostek
+    df_map = load_power_plant_locations_pl()  # dane zagregowane do mapy
+
+    if df_map.empty:
         st.warning("Brak danych lokalizacyjnych do wyświetlenia.")
         return
 
-    m = folium.Map(location=[52.2, 19.2], zoom_start=6, tiles="CartoDB positron")
+    df_map["lat_rounded"] = df_map["lat"].round(4)
+    df_map["lon_rounded"] = df_map["lon"].round(4)
 
-    for _, row in df.iterrows():
-        capacity = row["capacity_mw"]
-        color = fuel_colors.get(row["fuel_type"], default_color)
-        radius = get_marker_radius(capacity)
+    m = folium.Map(location=[52.2, 19.2], zoom_start=6, tiles="CartoDB positron")
+    marker_map = {}
+
+    grouped = df_map.groupby(["lat_rounded", "lon_rounded"])
+
+    for (lat, lon), group in grouped:
+        fuels = group["fuel_type"].unique()
+        total_capacity = group["capacity_mw"].sum()
+        dominant_fuel = group["fuel_type"].mode().iloc[0] if not group["fuel_type"].mode().empty else "Nieznany"
+        color = fuel_colors.get(dominant_fuel, default_color)
+        radius = get_marker_radius(total_capacity)
+
+        popup_html = [
+            f"<b>Lokalizacja:</b> {lat:.5f}, {lon:.5f}<br>",
+            f"<b>Łączna moc:</b> {total_capacity:.1f} MW<br>",
+            "<hr><b>Jednostki w tej lokalizacji:</b><br>"
+        ]
+        for _, row in group.iterrows():
+            popup_html.append(
+                f"• <b>{row['plant_name']}</b> – {row['fuel_type']}, {row['capacity_mw']:.1f} MW<br>"
+            )
+
+        popup_html = "".join(popup_html)
 
         folium.CircleMarker(
-            location=(row["lat"], row["lon"]),
+            location=(lat, lon),
             radius=radius,
             color=color,
             fill=True,
             fill_opacity=0.8,
-            popup=folium.Popup(
-                f"<b>{row['plant_name']}</b><br>"
-                f"Typ: {row['fuel_type']}<br>"
-                f"Moc: {capacity:.1f} MW" if not pd.isna(capacity) else "Brak danych",
-                max_width=250
-            )
+            popup=folium.Popup(popup_html, max_width=350)
         ).add_to(m)
-    add_legend_to_map(m)  # <--- dodano tutaj
-    st_folium(m, width=900, height=600)
+
+        marker_map[(lat, lon)] = group["plant_name"].tolist()
+
+    add_legend_to_map(m)
+
+    with st.container():
+        result = st_folium(m, width=900, height=600)
+
+        # Przyciski eksportu w jednej linii
+        col1, col2, col3,col4,col5 = st.columns(5)
+
+        with col1:
+            csv_map = df_map.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Pobierz dane mapy (CSV)",
+                data=csv_map,
+                file_name="map_data_aggregated.csv",
+                mime="text/csv",
+            )
+
+        with col2:
+            csv_all_blocks = df_blocks.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Pobierz wszystkie rekordy (CSV)",
+                data=csv_all_blocks,
+                file_name="all_blocks_data.csv",
+                mime="text/csv",
+            )
+
+        clicked = result.get("last_object_clicked")
+        if clicked:
+            lat = round(clicked["lat"], 4)
+            lon = round(clicked["lng"], 4)
+            plant_names = marker_map.get((lat, lon), [])
+
+            if plant_names:
+                matched_blocks = df_blocks[df_blocks["plant_name"].isin(plant_names)]
+
+                with col3:
+                    csv_blocks = matched_blocks.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        label="📥 Pobierz dane lokalizacji (CSV)",
+                        data=csv_blocks,
+                        file_name=f"dane_lokalizacji_{lat}_{lon}.csv",
+                        mime="text/csv",
+                    )
+
+                st.markdown(f"#### Szczegóły jednostek w lokalizacji `{lat}, {lon}`")
+                st.dataframe(matched_blocks.sort_values("plant_name"), use_container_width=True)
+            else:
+                st.info("Nie znaleziono danych dla tej lokalizacji.")
+
+
 
 # --- Interfejs główny
 def main():
