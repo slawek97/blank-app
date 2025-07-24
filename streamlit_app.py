@@ -249,7 +249,7 @@ def mapa_view():
         with col1:
             csv_map = df_map.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="📥 Pobierz dane mapy (CSV)",
+                label="📥 Pobierz dane mapy (zagregowane, CSV)",
                 data=csv_map,
                 file_name="map_data_aggregated.csv",
                 mime="text/csv",
@@ -258,7 +258,7 @@ def mapa_view():
         with col2:
             csv_all_blocks = df_blocks.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="📥 Pobierz wszystkie rekordy (CSV)",
+                label="📥 Pobierz wszystkie rekordy (pełne dane bloków, CSV)",
                 data=csv_all_blocks,
                 file_name="all_blocks_data.csv",
                 mime="text/csv",
@@ -276,7 +276,7 @@ def mapa_view():
                 with col3:
                     csv_blocks = matched_blocks.to_csv(index=False).encode("utf-8")
                     st.download_button(
-                        label="📥 Pobierz dane lokalizacji (CSV)",
+                        label="📥 Pobierz dane klikniętej lokalizacji (CSV)",
                         data=csv_blocks,
                         file_name=f"dane_lokalizacji_{lat}_{lon}.csv",
                         mime="text/csv",
@@ -286,8 +286,6 @@ def mapa_view():
                 st.dataframe(matched_blocks.sort_values("plant_name"), use_container_width=True)
             else:
                 st.info("Nie znaleziono danych dla tej lokalizacji.")
-
-
 
 # --- Interfejs główny
 def main():
