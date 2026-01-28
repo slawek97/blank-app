@@ -9,11 +9,24 @@ import plotly.graph_objs as go
 import folium
 from streamlit_folium import st_folium
 from io import BytesIO
+import json 
 
-# --- Stałe 
+# --- Stałe
 DROPBOX_URL = "https://www.dropbox.com/scl/fi/illcf1t8fjazd7ic0vvu6/mybase.db?rlkey=bfvio8dkozl9vnx1f7se1eemq&st=14hf4fgb&dl=1"
 LOCAL_DB_PATH = "/tmp/mybase.db"
 TABLE_NAME = "gen_jw_data"
+
+# --- Wczytanie linii energetycznych z Dropbox
+@st.cache_data
+def load_power_lines_geojson():
+    geojson_url = "https://www.dropbox.com/scl/fi/chnec0l9m8xo501v63l4u/power_lines_pl.geojson?rlkey=1aafpi3idqej6r5tpq452wb56&dl=1"
+    try:
+        response = requests.get(geojson_url)
+        response.raise_for_status()
+        return json.loads(response.text)
+    except Exception as e:
+        st.error(f"❌ Nie udało się pobrać pliku GeoJSON z linii energetycznych: {e}")
+        return None
 
 # --- Pobierz bazę jeśli nie istnieje
 @st.cache_data(show_spinner="Pobieranie bazy danych...")
@@ -26,7 +39,9 @@ def download_db():
                     f.write(chunk)
     return LOCAL_DB_PATH
 
+
 # --- Reszta kodu jak wcześniej, np.:
+
 
 @st.cache_data
 def get_power_plants():
@@ -35,9 +50,11 @@ def get_power_plants():
     con.close()
     return df["power_plant"].dropna().tolist()
 
+
 def fetch_data_multi(start_date, end_date, plant_names):
     if not plant_names:
         return pd.DataFrame()
+
 
     placeholders = ",".join("?" for _ in plant_names)
     query = f"""
@@ -50,10 +67,12 @@ def fetch_data_multi(start_date, end_date, plant_names):
     """
     params = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")] + plant_names
 
+
     con = sqlite3.connect(LOCAL_DB_PATH)
     df = pd.read_sql_query(query, con, params=params)
     con.close()
     return df
+
 
 # --- Wczytanie danych lokalizacji elektrowni z Excela (Dropbox)
 @st.cache_data
@@ -66,11 +85,13 @@ def load_power_plant_locations_pl():
         st.error(f"❌ Nie udało się pobrać danych lokalizacyjnych z Dropboxa: {e}")
         return pd.DataFrame()
 
+
     try:
         df = pd.read_excel(BytesIO(response.content), engine='openpyxl')
     except Exception as e:
         st.error(f"❌ Błąd podczas odczytu pliku Excel: {e}")
         return pd.DataFrame()
+
 
     # Konwersje nazw kolumn na łatwiejsze
     df = df.rename(columns={
@@ -81,13 +102,16 @@ def load_power_plant_locations_pl():
         "Długość geograficzna []": "lon"
     })
 
+
     # Konwersja mocy i współrzędnych na liczby
     df["capacity_mw"] = pd.to_numeric(df["capacity_mw"], errors="coerce")
     df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
     df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
 
+
     # Usuwamy wiersze bez koordynatów
     df = df.dropna(subset=["lat", "lon", "plant_name"])
+
 
     # Grupujemy dane po plant_name — sumujemy moce i bierzemy średnie koordynaty
     # Wybierzemy fuel_type jako najczęstszy dla danej elektrowni (mode)
@@ -98,7 +122,9 @@ def load_power_plant_locations_pl():
         "fuel_type": lambda x: x.mode().iloc[0] if not x.mode().empty else "Nieznany"
     }).reset_index()
 
+
     return agg_df[["plant_name", "fuel_type", "capacity_mw", "lat", "lon"]]
+
 
 @st.cache_data
 def load_power_plant_data():
@@ -110,11 +136,13 @@ def load_power_plant_data():
         st.error(f"❌ Nie udało się pobrać danych lokalizacyjnych z Dropboxa: {e}")
         return pd.DataFrame()
 
+
     try:
         df = pd.read_excel(BytesIO(response.content), engine='openpyxl')
     except Exception as e:
         st.error(f"❌ Błąd podczas odczytu pliku Excel: {e}")
         return pd.DataFrame()
+
 
     # Konwersje nazw kolumn na łatwiejsze
     df = df.rename(columns={
@@ -125,11 +153,14 @@ def load_power_plant_data():
         "Długość geograficzna []": "lon"
     })
 
+
     df["capacity_mw"] = pd.to_numeric(df["capacity_mw"], errors="coerce")
     df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
     df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
 
+
     return df.dropna(subset=["lat", "lon", "plant_name"])
+
 
 def add_legend_to_map(m):
     legend_html = """
@@ -164,6 +195,7 @@ def add_legend_to_map(m):
     """
     m.get_root().html.add_child(folium.Element(legend_html))
 
+
 # --- Wyświetlenie mapy
 fuel_colors = {
     "Gaz ziemny": "orange",
@@ -176,7 +208,9 @@ fuel_colors = {
     "Gaz wielkopiecowy": "lightgray"
 }
 
+
 default_color = "gray"
+
 
 def get_marker_radius(capacity):
     if pd.isna(capacity):
@@ -203,11 +237,75 @@ def mapa_view():
     df_map["lat_rounded"] = df_map["lat"].round(4)
     df_map["lon_rounded"] = df_map["lon"].round(4)
 
+    # --- Stworzenie mapy
     m = folium.Map(location=[52.2, 19.2], zoom_start=6, tiles="CartoDB positron")
     marker_map = {}
 
-    grouped = df_map.groupby(["lat_rounded", "lon_rounded"])
+    # --- Wczytanie linii energetycznych z Dropbox
+    dropbox_lines_url = "https://www.dropbox.com/scl/fi/iurn80vfqhbd0c0jmd2pu/export.geojson?rlkey=iz8olnfgq2vmhdcsczhaqm8kg&st=m6a24z46&dl=1"
+    lines_geojson = None
+    try:
+        resp = requests.get(dropbox_lines_url)
+        resp.raise_for_status()
+        lines_geojson = resp.json()
+    except Exception as e:
+        st.error(f"❌ Nie udało się pobrać danych linii energetycznych: {e}")
 
+    if lines_geojson:
+        # --- Słownik warstw i kolorów ---
+        layers = {}
+        color_palette = ["darkred", "darkblue", "darkgreen", "orange", "purple", "brown", "deeppink", "darkcyan"]
+
+        def get_layer(voltage):
+            """Zwraca FeatureGroup i kolor dla napięcia"""
+            if voltage not in layers:
+                idx = len(layers)
+                color = color_palette[idx % len(color_palette)]
+                layer = folium.FeatureGroup(name=f"{voltage//1000} kV").add_to(m)
+                layers[voltage] = {"layer": layer, "color": color}
+            return layers[voltage]
+
+        # --- Funkcja zwracająca listę (napięcie, nazwa) dla głównego napięcia i relacji ---
+        def extract_voltage_name(feature):
+            props = feature.get("properties", {})
+            results = []
+
+            # główne napięcie
+            if "voltage" in props and props["voltage"]:
+                try:
+                    results.append((int(props["voltage"]), props.get("name", "linia")))
+                except:
+                    pass
+
+            # relacje
+            for rel in props.get("@relations", []):
+                reltags = rel.get("reltags", {})
+                if "voltage" in reltags and reltags["voltage"]:
+                    try:
+                        results.append((int(reltags["voltage"]), reltags.get("name", "linia")))
+                    except:
+                        pass
+
+            return results
+
+        # --- Rysowanie linii ---
+        for feature in lines_geojson.get("features", []):
+            for voltage, name in extract_voltage_name(feature):
+                layer_info = get_layer(voltage)
+                folium.GeoJson(
+                    feature,
+                    style_function=lambda f, color=layer_info["color"]: {
+                        "color": color,
+                        "weight": 4,
+                        "opacity": 1.0
+                    },
+                    tooltip=f"{name} ({voltage//1000} kV)"
+                ).add_to(layer_info["layer"])
+    else:
+        st.warning("Nie udało się wczytać GeoJSON linii.")
+
+    # --- Dodanie elektrowni
+    grouped = df_map.groupby(["lat_rounded", "lon_rounded"])
     for (lat, lon), group in grouped:
         fuels = group["fuel_type"].unique()
         total_capacity = group["capacity_mw"].sum()
@@ -224,7 +322,6 @@ def mapa_view():
             popup_html.append(
                 f"• <b>{row['plant_name']}</b> – {row['fuel_type']}, {row['capacity_mw']:.1f} MW<br>"
             )
-
         popup_html = "".join(popup_html)
 
         folium.CircleMarker(
@@ -238,8 +335,13 @@ def mapa_view():
 
         marker_map[(lat, lon)] = group["plant_name"].tolist()
 
+    # --- Dodanie legendy
     add_legend_to_map(m)
 
+    # --- Dodanie kontroli warstw (linie + elektrownie)
+    folium.LayerControl().add_to(m)
+
+    # --- Wyświetlenie mapy w Streamlit
     with st.container():
         result = st_folium(m, width=900, height=600)
 
@@ -287,17 +389,21 @@ def mapa_view():
             else:
                 st.info("Nie znaleziono danych dla tej lokalizacji.")
 
+
 # --- Interfejs główny
 def main():
     st.set_page_config(page_title="PSE generacja jednostek konwencjonalnych", layout="wide")
     st.title("⚡ PSE generacja jednostek konwencjonalnych")
 
+
     # Sidebar - menu wyboru widoku
     page = st.sidebar.radio("Wybierz widok", ["Widok tabeli", "Wykresy", "Mapa"])
+
 
     if page == "Widok tabeli":
         download_db()
         plant_options = ["(Wszystkie)"] + get_power_plants()
+
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -306,6 +412,7 @@ def main():
             end_date = st.date_input("Data końcowa", datetime(2025, 12, 31))
         with col3:
             selected_plant = st.selectbox("Jednostka (power_plant)", plant_options)
+
 
         if st.button("🔄 Pobierz dane"):
             plant_filter = "" if selected_plant == "(Wszystkie)" else selected_plant
@@ -316,8 +423,10 @@ def main():
             if "df" not in st.session_state:
                 st.info("Ustaw filtry i kliknij **Pobierz dane**, aby rozpocząć.")
 
+
         if "df" in st.session_state and not st.session_state["df"].empty:
             df = st.session_state["df"]
+
 
             col_space, col_dl = st.columns([7, 1])
             with col_dl:
@@ -329,6 +438,7 @@ def main():
                     key="download_csv",
                     use_container_width=True
                 )
+
 
             gb = GridOptionsBuilder.from_dataframe(df)
             gb.configure_pagination(enabled=True)
@@ -342,6 +452,7 @@ def main():
             )
             grid_options = gb.build()
 
+
             AgGrid(
                 df,
                 gridOptions=grid_options,
@@ -353,12 +464,15 @@ def main():
         elif "df" in st.session_state and st.session_state["df"].empty:
             st.warning("Brak danych dla wybranych filtrów.")
 
+
     # --- Wykresy
     elif page == "Wykresy":
         st.subheader("Wykresy generacji bloków w jednostkach")
 
+
         download_db()
         plant_options = get_power_plants()
+
 
         col1, col2 = st.columns(2)
         with col1:
@@ -366,19 +480,24 @@ def main():
         with col2:
             date_range = st.date_input("Zakres dat", [datetime(2025, 1, 1), datetime(2025, 1, 7)])
 
+
         if len(date_range) != 2:
             st.warning("Wybierz poprawny zakres dat.")
             return
 
+
         start_date, end_date = date_range
+
 
         if st.button("Generuj wykres"):
             if not selected_plants:
                 st.warning("Wybierz przynajmniej jedną jednostkę.")
                 return
 
+
             with st.spinner("Ładowanie danych..."):
                 df = fetch_data_multi(start_date, end_date, selected_plants)
+
 
             if df.empty:
                 st.warning("Brak danych dla wybranych filtrów.")
@@ -386,7 +505,9 @@ def main():
                 df["dtime_utc"] = pd.to_datetime(df["dtime_utc"])
                 df["blok"] = df["power_plant"] + " / " + df["resource_code"]
 
+
                 fig = go.Figure()
+
 
                 for (plant, resource), group in df.groupby(["power_plant", "resource_code"]):
                     group = group.sort_values("dtime_utc")
@@ -398,6 +519,7 @@ def main():
                         hovertemplate=f"{plant} / {resource}<br>%{{x}}<br>%{{y:.2f}} MW<extra></extra>"
                     ))
 
+
                 fig.update_layout(
                     title="Generacja bloków (MW)",
                     xaxis_title="Czas",
@@ -407,12 +529,16 @@ def main():
                     legend_title="Bloki"
                 )
 
+
                 fig.update_xaxes(rangeslider_visible=True)
                 fig.update_layout(dragmode="zoom")
+
 
                 st.plotly_chart(fig, use_container_width=True)
     elif page == "Mapa":
         mapa_view()
+
+
 
 
     # --- Stopka
@@ -422,5 +548,9 @@ def main():
         unsafe_allow_html=True
     )
 
+
 if __name__ == "__main__":
     main()
+
+
+
